@@ -1,7 +1,9 @@
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from starlette import status
+import openai
 
 from app.api.dependencies.items import (
     check_item_modification_permissions,
@@ -26,6 +28,7 @@ from app.services.items import check_item_exists, get_slug_for_item
 from app.services.event import send_event
 
 router = APIRouter()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
 @router.get("", response_model=ListOfItemsInResponse, name="items:list-items")
@@ -42,9 +45,7 @@ async def list_items(
         offset=items_filters.offset,
         requested_user=user,
     )
-    items_for_response = [
-        ItemForResponse.from_orm(item) for item in items
-    ]
+    items_for_response = [ItemForResponse.from_orm(item) for item in items]
     return ListOfItemsInResponse(
         items=items_for_response,
         items_count=len(items),
@@ -68,6 +69,9 @@ async def create_new_item(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=strings.ITEM_ALREADY_EXISTS,
         )
+    if not item_create.image:
+        response = openai.Image.create(prompt=item_create.title, n=1, size="256x256")
+        item_create.image = response["data"][0]["url"]
     item = await items_repo.create_item(
         slug=slug,
         title=item_create.title,
@@ -75,9 +79,9 @@ async def create_new_item(
         body=item_create.body,
         seller=user,
         tags=item_create.tags,
-        image=item_create.image
+        image=item_create.image,
     )
-    send_event('item_created', {'item': item_create.title})
+    send_event("item_created", {"item": item_create.title})
     return ItemInResponse(item=ItemForResponse.from_orm(item))
 
 
